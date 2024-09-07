@@ -2,9 +2,12 @@ version: 1
 
 script:
 - |
+  set -eu
+
   if [ "{{APPIMAGE_SOURCE}}" != "${TARGET_APPDIR}" ]; then
     mv "{{APPIMAGE_SOURCE}}" "${TARGET_APPDIR}"
   fi
+
   # Manual installation of squashfs-tools is required
   # until https://github.com/AppImageCrafters/build-appimage/issues/5 is fixed
   if ! command -v mksquashfs >/dev/null; then
@@ -38,6 +41,16 @@ AppDir:
       fi
     done
 
+  after_runtime: |
+    set -eu
+
+    # python3 is linked against 'lib64/ld-linux-x86-64.so.2'
+    # but 'compat/lib64' is missing for Ubuntu Noble
+    compat="${TARGET_APPDIR}/runtime/compat"
+    if [ ! -e "${compat}/lib64" ] && [ -d "${compat}/usr/lib64" ]; then
+      ln -s "usr/lib64" "${compat}/"
+    fi
+
   apt:
     arch:
       - "{{APPIMAGE_APT_ARCH}}"
@@ -51,9 +64,15 @@ AppDir:
       - sourceline: deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ {{APPIMAGE_APT_DISTRO}}-security main universe
 
     include:
+      - gir1.2-gtk-3.0
       - gir1.2-rsvg-2.0
       - libbluetooth3
+      - libgtk-3-0
       - librsvg2-common
+      - libx11-6
+      - libxcb1
+      - libxext6
+      - libxfixes3
       - python3-evdev
       - python3-gi-cairo
       - python3-pylibacl
@@ -61,48 +80,65 @@ AppDir:
       - binutils         # required for detection of bluetooth library
       - coreutils        # provides /usr/bin/env
       - shared-mime-info # required for gui if host provides no MIME info, e.g. when XDG_DATA_DIRS is missing
+
     exclude:
-      - gcc*            # development
-      - libgcc*         # development
-      - libstdc*        # development
-      - libtirpc*       # development
-      - libuuid*        # development
+      # coreutils
+      - libacl*         # filesystem
       - libattr*        # filesystem
-      - libblkid*       # filesystem
-      - libmount*       # filesystem
-      - libbz*          # codec
-      - libjpeg*        # codec
-      - liblzma*        # codec
-      - libtiff*        # codec
+      - libgmp*         # arithmetics
+
+      # gir1.2-rsvg-2.0
+      - libicu*         # i18n
+      - libstdc*        # development
       - libxml*         # codec
-      - libwebp*        # codec
-      - media-types     # codec
-      - libpixman*      # X
-      - libxext*        # X
-      - libxrender*     # X
+
+      # libgtk3-0
+      - "*-icon-theme"  # gui
+      - "*crypt*"       # security
+      - "*dconf*"       # gui configuration
+      - "*dbus*"        # process communication
+      - "*gcc*"         # development
+      - "*systemd*"     # linux core
+      - libblk*         # filesystem
+      - libcolord*      # gui
+      - libcups*        # printing
+      - libepoxy*       # gui
       - libfontconfig*  # fonts
       - libfreetype*    # fonts
       - libfribidi*     # i18n
-      - libicu*         # i18n
-      - libgmp*         # arithmetics
+      - libgtk-3-common # gui
+      - liblz*          # codec
+      - libmount*       # filesystem
+      - libtiff*        # codec
+      - libwebp*        # codec
+
+      # python3
+      - "*krb*"         # security
+      - "*readline*"    # terminal
+      - "*sqlite*"      # database
+      - libbz*          # codec
+      - libdb*          # database
       - libmpdec*       # arithmetics
       - libncurses*     # terminal
-      - libreadline*    # terminal
-      - readline*       # terminal
-      - libssl*         # security
-      - "*crypt*"       # security
-      - "*krb*"         # security
-      - libdb*          # database
-      - "*sqlite*"      # database
       - libnsl*         # network
+      - libssl*         # security
+      - libtirpc*       # development
+      - libuuid*        # development
+      - media-types     # codec
 
+      # Ubuntu Noble
+      - libgprofng*     # development
+      - libjansson*     # codec
+      - libsframe*      # development
+      - netbase         # network
+      - tzdata          # date/time
 
   files:
     exclude:
       - usr/bin/*gold*              # alternative for ld
-      - usr/bin/*gp-display-html*   # since Ubuntu Lunatic, requires perl
+      - usr/bin/*gp-display-html*   # requires perl
       - usr/lib/*/gconv             # unicode
-      - usr/lib/*/gdk-pixbuf-2.0/*/loaders/libpixbufloader-[!s]*.so # only svg is required
+      - usr/lib/*/gdk-pixbuf-2.0/*/loaders/libpixbufloader-??[!g].so # only png & svg are required
       - usr/lib/*/glib-2.0
       - usr/lib/python*/cgi.py
       - usr/lib/python*/email
