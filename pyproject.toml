@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sccontroller"
-version = "1.0.0"
+version = "1.0.1"
 description = "User-mode driver, mapper and GTK4 based GUI for Steam Controller, DS4 and similar controllers."
 authors = [{name = "C0rn3j", email = "martin@rys.rs"}]
 license = "GPL-2.0-only"
