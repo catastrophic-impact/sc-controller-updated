@@ -14,10 +14,17 @@ The original README is kept as [README.upstream.md](README.upstream.md). All cre
 - **Dark theme by default** and software rendering by default, which removes the EGL/Vulkan renderer warnings printed inside AppImages.
 - **Missing icons fixed** in the AppImage (for example the OK button in the action editor): the standard Adwaita symbolic icons are bundled.
 
-## Planned
+## Import / Export
 
-- Simpler Import / Export of profiles (one-click export, preview before import, no silent overwrites).
-- A portable AppImage that keeps its configuration next to the AppImage instead of in `~/.config`.
+- **Export profile...** saves the profile you are editing (including changes you have not saved) with one file dialog. If it uses other profiles or menus they are bundled automatically.
+- **Import profile...** opens a preview first: you see the name, anything else that comes with it, and a warning if it runs shell commands. If the name is taken you choose between a new copy (the default) or replacing; nothing is overwritten silently, and built-in profiles are never replaced. A note appears if the profile was made for a different controller.
+- Importing Steam profiles and the original wizard are still available under **Import Steam profile (advanced)...**.
+
+The logic is in `scc/profile_package.py` and is covered by `tests/test_profile_package.py` (round trips, name clashes, reference rewriting, unsafe archives).
+
+## Portable
+
+When run as an AppImage, all settings, data and cache are stored in a `config` folder next to the `.AppImage` file, never in `~/.config`. Set `SCC_CONFIG_DIR` to choose another location.
 
 ## Building and running
 

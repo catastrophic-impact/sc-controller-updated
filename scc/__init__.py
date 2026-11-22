@@ -21,6 +21,17 @@ import subprocess
 
 # fork: set before GTK is ever loaded. Software rendering avoids the "Failed to realize renderer ... EGL / Vulkan"
 # messages inside the AppImage (no GPU driver is reachable there, GTK fell back to this anyway). Dark theme is permanent.
+# Portable mode: when running as an AppImage, ALL settings/data/cache live in a "config" folder next to the .AppImage
+# file (never ~/.config). SCC_CONFIG_DIR overrides the location. Applies to the GUI and the daemon (it inherits this).
+_portable = os.environ.get("SCC_CONFIG_DIR") or (
+	os.path.join(os.path.dirname(os.path.abspath(os.environ["APPIMAGE"])), "config") if os.environ.get("APPIMAGE") else None
+)
+if _portable:
+	os.environ["XDG_CONFIG_HOME"] = _portable
+	os.environ["XDG_DATA_HOME"] = os.path.join(_portable, "data")
+	os.environ["XDG_CACHE_HOME"] = os.path.join(_portable, "cache")
+	for _d in (_portable, os.environ["XDG_DATA_HOME"], os.environ["XDG_CACHE_HOME"]):
+		os.makedirs(_d, exist_ok=True)
 os.environ.setdefault("GSK_RENDERER", "cairo")
 os.environ.setdefault("GTK_THEME", "Adwaita:dark")
 

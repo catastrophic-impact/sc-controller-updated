@@ -10,6 +10,7 @@ import logging
 import os
 import platform
 import re
+import signal
 import sys
 from typing import TYPE_CHECKING
 from urllib.parse import unquote
@@ -32,7 +33,7 @@ from scc.gui.statusicon import get_status_icon
 from scc.gui.userdata_manager import UserDataManager
 from scc.modifiers import NameModifier
 from scc.osd import menu_generators
-from scc.paths import get_config_path, get_profiles_path
+from scc.paths import get_config_path, get_pid_file, get_profiles_path
 from scc.profile import Profile
 from scc.tools import (
 	_,
@@ -142,6 +143,16 @@ class App(Gtk.Application, UserDataManager, BindingEditor):
 		self.window.set_title(_("SC Controller"))
 		self.ribar = None
 		self.create_binding_buttons()
+		# fork: menu entries are plain buttons; left-align them and drop the frame so the menu reads like a menu
+		for name in ("mnuGlobalSettings", "mnuPermissions", "mnuImport", "mnuExport", "mnuImportSteam", "mnuAbout", "mnuExit"):
+			b = self.builder.get_object(name)
+			if b is None:
+				continue
+			b.set_has_frame(False)
+			lbl = b.get_child()
+			if isinstance(lbl, Gtk.Label):
+				lbl.set_xalign(0)
+				lbl.set_hexpand(True)
 		# fork: start as a small "Loading…" window instead of the huge unconfigured layout; it grows to fit once the
 		# first controller layout is applied (apply_gui_config_buttons).
 		stck = self.builder.get_object("stckEditor")
@@ -302,6 +313,8 @@ class App(Gtk.Application, UserDataManager, BindingEditor):
 		btC = self.builder.get_object("btC")
 
 		buttons = ControllerImage.get_names(config.get("buttons", {}))
+		if "sc2_DOTS" in buttons and "DOTS" not in buttons:
+			buttons = [*buttons, "DOTS"]  # fork: the 2026 Steam Controller names its "..." button sc2_DOTS
 		axes = ControllerImage.get_names(config.get("axes", {}))
 		gyros = config.get("gyros", False)
 		# Set sensitivity to signalize available inputs
@@ -339,6 +352,15 @@ class App(Gtk.Application, UserDataManager, BindingEditor):
 
 		for w in (btC, btCPAD, btDPAD, btGYRO):
 			w.set_visible(w.get_sensitive())
+		# fork: the "..." button is invisible (but keeps its space) on controllers without it, so the layout does not
+		# shrink and shift up
+		btDOTS = self.builder.get_object("btDOTS")
+		if btDOTS is not None:
+			has = btDOTS.get_sensitive()
+			btDOTS.set_visible(True)
+			btDOTS.set_opacity(1.0 if has else 0.0)
+			btDOTS.set_can_target(has)
+			btDOTS.set_can_focus(has)
 
 		# Re-layout if needed
 		expected_layout = "default"
@@ -448,6 +470,7 @@ class App(Gtk.Application, UserDataManager, BindingEditor):
 			msg += "\n\n" + _("Please, consult your distribution manual on how to enable uinput")
 			msg += "\n" + _('or click on "Fix Temporary" button to attempt fix that should work until next restart.')
 			ribar = self.show_error(msg)
+			self.add_setup_button(ribar)
 			gksudo = find_gksudo()
 			if gksudo and not hasattr(ribar, "_fix_tmp"):
 				button = Gtk.Button.new_with_label(_("Fix Temporary"))
@@ -682,10 +705,33 @@ class App(Gtk.Application, UserDataManager, BindingEditor):
 		gs.show(self.window)
 
 	def on_mnuImport_activate(self, *a):
-		"""Handler for 'Import Steam Profile' context menu item.
+		"""fork: simple import - pick a file, preview, confirm."""
+		from scc.gui import profile_io
 
-		Displays apropriate dialog.
-		"""
+		profile_io.import_profile(self)
+
+	def on_mnuExport_activate(self, *a):
+		"""fork: one-click export of the profile being edited (including unsaved changes)."""
+		from scc.gui import profile_io
+
+		profile_io.export_profile(self)
+
+	def on_mnuPermissions_activate(self, *a):
+		"""fork: shows the one-time udev / uinput setup command with a copy button."""
+		from scc.gui.permissions import PermissionsDialog
+
+		PermissionsDialog(self).present()
+
+	def add_setup_button(self, ribar) -> None:
+		"""Adds a 'How to fix' button to an error bar that opens the access setup window."""
+		if ribar is not None and not hasattr(ribar, "_setup_btn"):
+			button = Gtk.Button.new_with_label(_("How to fix"))
+			ribar._setup_btn = button
+			button.connect("clicked", self.on_mnuPermissions_activate)
+			ribar.add_button(button, -1)
+
+	def on_mnuImportSteam_activate(self, *a):
+		"""Advanced: the original multi-step import/export wizard (Steam VDF profiles etc.)."""
 		from scc.gui.importexport.dialog import Dialog
 
 		ied = Dialog(self)
@@ -1034,6 +1080,11 @@ class App(Gtk.Application, UserDataManager, BindingEditor):
 		self.quit()
 
 	def on_mnuExit_activate(self, *a):
+		if getattr(self, "_exiting", False):
+			# fork: clicking close again while it is still shutting down means "now"
+			self._force_quit()
+			return
+		self._exiting = True
 		if not self.osd_mode and self.app.config["gui"]["autokill_daemon"]:
 			log.debug("Terminating scc-daemon")
 			for x in ("content", "mnuEmulationEnabled", "mnuEmulationEnabledTray"):
@@ -1041,16 +1092,33 @@ class App(Gtk.Application, UserDataManager, BindingEditor):
 				w.set_sensitive(False)
 			self.set_daemon_status("unknown", False)
 			self.hide_error()
-			if self.dm.is_alive():
-				self.dm.connect("dead", self.on_exiting_n_daemon_killed)
-				self.dm.connect("error", self.on_exiting_n_daemon_killed)
-				self.dm.stop()
-			else:
-				# Daemon appears to be dead, kill it just in case
-				self.dm.stop()
-				self.quit()
+			# fork: whatever happens, the app must close. If the daemon never confirms it stopped (stuck, already gone,
+			# stop command failed) give up after 3 seconds, stop it directly and quit.
+			GLib.timeout_add_seconds(3, self._force_quit)
+			try:
+				if self.dm.is_alive():
+					self.dm.connect("dead", self.on_exiting_n_daemon_killed)
+					self.dm.connect("error", self.on_exiting_n_daemon_killed)
+					self.dm.stop()
+				else:
+					# Daemon appears to be dead, kill it just in case
+					self.dm.stop()
+					self.quit()
+			except Exception as e:  # noqa: BLE001
+				log.error("Stopping the daemon failed: %s", e)
+				self._force_quit()
 		else:
 			self.quit()
+
+	def _force_quit(self):
+		"""Stops the daemon straight from its pid file (if any) and quits, without waiting for anything."""
+		try:
+			with open(get_pid_file()) as f:
+				os.kill(int(f.read().strip()), signal.SIGTERM)
+		except (OSError, ValueError):
+			pass
+		self.quit()
+		return GLib.SOURCE_REMOVE
 
 	def on_mnuAbout_activate(self, *a) -> None:
 		from scc.gui.aboutdialog import AboutDialog
@@ -1164,7 +1232,13 @@ class App(Gtk.Application, UserDataManager, BindingEditor):
 		ids = [c.get_id() for c in controllers]
 		labels = [self.controller_label(i, self.config.get_controller_config(i)["name"]) for i in ids]
 		self._picker_ids = ids
-		self._picker.set_model(Gtk.StringList.new(labels or [_("No controller connected")]))
+		shown = labels or [_("No controller connected")]
+		model = self._picker.get_model()
+		if model is None or not isinstance(model, Gtk.StringList):
+			model = Gtk.StringList.new([])
+			self._picker.set_model(model)
+		model.splice(0, model.get_n_items(), shown)  # update in place so the dropdown redraws
+		self._picker.set_selected(0)
 		self._picker_row.set_visible(not self.osd_mode)  # always shown, so the layout never jumps
 		self._picker.set_sensitive(len(ids) > 1)  # nothing to choose with 0 or 1 controllers
 		if len(ids) > 1:
@@ -1427,7 +1501,9 @@ class App(Gtk.Application, UserDataManager, BindingEditor):
 		if self.osd_mode:
 			self.quit()
 
-		self.show_error(msg)
+		ribar = self.show_error(msg)
+		if "LIBUSB_ERROR_ACCESS" in error:
+			self.add_setup_button(ribar)
 		self.set_daemon_status("error", True)
 
 	def on_daemon_event_observer(self, daemon, c, what: str, data: list[int]) -> None:

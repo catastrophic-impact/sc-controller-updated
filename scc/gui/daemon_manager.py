@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import socket
 
 from gi.repository import Gio, GLib, GObject
 
@@ -108,10 +109,33 @@ class DaemonManager(GObject.GObject):
 		"""Returns True if there is at lease one controller connected to daemon."""
 		return len(self._controllers) > 0
 
+	@staticmethod
+	def _remove_stale_socket() -> None:
+		"""fork: a daemon that was killed or crashed leaves its socket file behind, and then no new daemon was started.
+		If nothing answers on the socket file, delete it."""
+		path = get_daemon_socket()
+		if not os.path.exists(path):
+			return
+		s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+		s.settimeout(1.0)
+		try:
+			s.connect(path)
+		except (ConnectionRefusedError, FileNotFoundError):
+			log.warning("Removing stale daemon socket %s", path)
+			try:
+				os.unlink(path)
+			except OSError:
+				pass
+		except OSError:
+			pass
+		finally:
+			s.close()
+
 	def _connect(self) -> None:
 		if self.connecting:
 			return
 		self.connecting = True
+		self._remove_stale_socket()
 		sc = Gio.SocketClient()
 		address = Gio.UnixSocketAddress.new(get_daemon_socket())
 		sc.connect_async(address, None, self._on_connected)

@@ -320,11 +320,40 @@
           </object>
         </child>
         <child>
+          <object class="GtkButton" id="mnuPermissions">
+            <property name="css-name">modelbutton</property>
+            <property name="label" translatable="yes">Set up controller _access...</property>
+            <property name="use-underline">True</property>
+            <signal name="clicked" handler="on_mnuPermissions_activate"/>
+          </object>
+        </child>
+        <child>
+          <object class="GtkSeparator" id="sepMenuTools">
+            <property name="orientation">horizontal</property>
+          </object>
+        </child>
+        <child>
           <object class="GtkButton" id="mnuImport">
             <property name="css-name">modelbutton</property>
-            <property name="label" translatable="yes">Import/Export _Profile...</property>
+            <property name="label" translatable="yes">_Import profile...</property>
             <property name="use-underline">True</property>
             <signal name="clicked" handler="on_mnuImport_activate"/>
+          </object>
+        </child>
+        <child>
+          <object class="GtkButton" id="mnuExport">
+            <property name="css-name">modelbutton</property>
+            <property name="label" translatable="yes">_Export profile...</property>
+            <property name="use-underline">True</property>
+            <signal name="clicked" handler="on_mnuExport_activate"/>
+          </object>
+        </child>
+        <child>
+          <object class="GtkButton" id="mnuImportSteam">
+            <property name="css-name">modelbutton</property>
+            <property name="label" translatable="yes">Import _Steam profile (advanced)...</property>
+            <property name="use-underline">True</property>
+            <signal name="clicked" handler="on_mnuImportSteam_activate"/>
           </object>
         </child>
         <child>

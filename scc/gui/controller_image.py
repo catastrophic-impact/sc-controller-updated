@@ -32,7 +32,7 @@ class ControllerImage(SVGWidget):
 		SCButtons.BACK,
 		SCButtons.C,
 		SCButtons.START,
-		SCButtons.DOTS,
+		# fork: DOTS ("...") is not on the 2015 Steam Controller; Deck / 2026 Steam Controller configs list it themselves
 	)
 
 	DEFAULT_AXES = (
