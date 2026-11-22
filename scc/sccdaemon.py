@@ -710,10 +710,31 @@ class SCCDaemon(Daemon):
 		self.lock.release()
 		self.start_drivers()
 		self.dev_monitor.rescan()
+		self._start_gui_watch()
 
 		while True:
 			for fn in self.mainloops:
 				fn()
+
+	def _start_gui_watch(self) -> None:
+		"""fork: if started by the GUI, stop when the GUI is gone (crash/kill) - unless the user chose to keep the daemon
+		running after the window closes (autokill_daemon off)."""
+		from scc.gui_watch import CHECK_SECONDS, process_alive, watched_gui_pid
+
+		pid = watched_gui_pid()
+		if pid is None:
+			return
+
+		def check() -> None:
+			if process_alive(pid):
+				self.scheduler.schedule(CHECK_SECONDS, check)
+			elif Config()["gui"]["autokill_daemon"]:
+				log.warning("GUI process %s is gone, stopping daemon", pid)
+				self.sigterm()
+			else:
+				log.debug("GUI process %s is gone, keeping daemon running (autokill_daemon is off)", pid)
+
+		self.scheduler.schedule(CHECK_SECONDS, check)
 
 	def start_listening(self) -> None:
 		if os.path.exists(self.socket_file):

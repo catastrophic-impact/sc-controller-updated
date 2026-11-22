@@ -300,6 +300,7 @@ class DaemonManager(GObject.GObject):
 			# Just to clean up living connection
 			self.alive = None
 			self._on_daemon_died()
+		os.environ["SCC_GUI_PID"] = str(os.getpid())  # fork: lets the daemon stop itself if this GUI dies (see scc/gui_watch.py)
 		Gio.Subprocess.new([find_binary("scc-daemon"), "/dev/null", mode], Gio.SubprocessFlags.NONE)
 		self._connect()
 		GLib.timeout_add_seconds(10, self._check_connected)

@@ -7,6 +7,7 @@ The original README is kept as [README.upstream.md](README.upstream.md). All cre
 ## What is different
 
 - **Closing the window quits everything.** The background daemon stops too, so the controller returns to normal desktop behaviour instead of staying mapped. (`autokill_daemon` now defaults to on; it is still a setting.)
+- **Crash-safe.** If the window crashes or is force-killed, the background program notices within a few seconds and stops too, so the controller is not left remapped. (Only when "stop daemon on close" is on, which is the default.)
 - **One Controller dropdown.** With a Steam Deck and a Steam Controller connected, a single "Controller:" dropdown above the "Profile:" dropdown picks which one you are editing, instead of two stacked profile rows. Both controllers keep running with their own profiles. The dropdown is always shown (greyed out when there is nothing to choose), remembers your choice, and prefers an external controller over the Deck's built-in one.
 - **Unplugging is handled.** If the controller you are editing disappears, the window switches to the remaining one and redraws its diagram.
 - **Save always asks where.** Changes apply live to the running controller, even if you never save them. The Save button always opens a "Save profile as..." file dialog, so nothing is written to a profile file by accident.
