@@ -102,7 +102,10 @@ class ProfileSwitcher(Gtk.Box, UserDataManager):
 		self.add_controller(click)
 
 		# Pack
+		self._label = Gtk.Label(label=_("Profile:"))  # fork: lines up with the "Controller:" label in app.py
+		self._label.set_xalign(0)
 		self._box.append(self._icon)
+		self._box.append(self._label)
 		self._box.append(self._combo)
 		self.append(self._box)
 

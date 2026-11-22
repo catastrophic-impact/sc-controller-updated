@@ -47,7 +47,8 @@ class Config:
 			"enable_status_icon": False,
 			"minimize_to_status_icon": True,
 			"minimize_on_start": False,
-			"autokill_daemon": False,
+			"last_controller": "",  # fork: id of the controller picked in the top dropdown
+			"autokill_daemon": True,  # fork: closing the window also stops the daemon so the controller returns to normal
 			"news": {
 				# Controls "new in this version" message
 				"enabled": True,  # if disabled, no querying is done

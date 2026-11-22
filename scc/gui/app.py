@@ -142,6 +142,20 @@ class App(Gtk.Application, UserDataManager, BindingEditor):
 		self.window.set_title(_("SC Controller"))
 		self.ribar = None
 		self.create_binding_buttons()
+		# fork: start as a small "Loading…" window instead of the huge unconfigured layout; it grows to fit once the
+		# first controller layout is applied (apply_gui_config_buttons).
+		stck = self.builder.get_object("stckEditor")
+		stck.set_hhomogeneous(False)
+		stck.set_vhomogeneous(False)
+		lbl = self.builder.get_object("lblEmpty")
+		lbl.set_label(_("Loading…"))
+		lbl.set_hexpand(True)
+		lbl.set_vexpand(True)
+		stck.set_visible_child(lbl)
+		# Normal window size from the start; profile/controller rows stay hidden until the layout is ready
+		self.window.set_default_size(960, 650)
+		self._ui_ready = False
+		self.builder.get_object("vbSwitchers").set_visible(False)
 
 	def _add_menu_action(self, name, callback, parameter_type=None):
 		action = Gio.SimpleAction.new(name, parameter_type)
@@ -336,6 +350,9 @@ class App(Gtk.Application, UserDataManager, BindingEditor):
 
 		stckEditor.set_visible_child(grEditor)
 		GLib.idle_add(self.on_c_size_allocate)
+		self.builder.get_object("lblEmpty").set_label("")  # drop the startup "Loading…" text
+		self._ui_ready = True
+		self.builder.get_object("vbSwitchers").set_visible(True)
 
 	def apply_ui_layout(self, layout: str) -> None:
 		"""Changes layout of ui elements to fit additional buttons needed for Deck"""
@@ -772,6 +789,52 @@ class App(Gtk.Application, UserDataManager, BindingEditor):
 			ps.get_controller().set_profile(self.current_file.get_path())
 
 	def on_save_clicked(self, *a):
+		"""fork: Save always asks where to save (and the dialog asks before overwriting). Edits are already live via
+		the .mod file, so nothing is ever written to a profile without this explicit action."""
+		if self.osd_mode:
+			return self._save_in_place()
+		dlg = Gtk.FileDialog()
+		dlg.set_title(_("Save profile as..."))
+		dlg.set_accept_label(_("Save"))
+		name = self.profile_switchers[0].get_profile_name() or _("profile")
+		dlg.set_initial_name(name + ".sccprofile")
+		try:
+			os.makedirs(get_profiles_path(), exist_ok=True)
+			dlg.set_initial_folder(Gio.File.new_for_path(get_profiles_path()))
+		except Exception:
+			pass
+		flt = Gtk.FileFilter()
+		flt.set_name(_("SC-Controller profiles"))
+		flt.add_pattern("*.sccprofile")
+		filters = Gio.ListStore.new(Gtk.FileFilter)
+		filters.append(flt)
+		dlg.set_filters(filters)
+		dlg.save(self.window, None, self._on_save_dialog_done)
+
+	def _on_save_dialog_done(self, dlg, result) -> None:
+		try:
+			f = dlg.save_finish(result)
+		except GLib.Error:
+			return  # cancelled
+		path = f.get_path()
+		if not path.endswith(".sccprofile"):
+			path += ".sccprofile"
+		cur = self.current_file.get_path() if self.current_file else ""
+		if cur.endswith(".mod"):
+			cur = cur[:-4]
+		folder, fname = os.path.split(path)
+		try:
+			if path == cur:
+				self.save_profile(Gio.File.new_for_path(path), self.current)
+			elif os.path.realpath(folder) == os.path.realpath(get_profiles_path()):
+				self.new_profile(self.current, fname[:-len(".sccprofile")])
+			else:
+				self.current.save(path)  # outside the profile folder: just write the file, keep editing live
+		except Exception as e:
+			log.error("Save failed: %s", e)
+			self.show_error(_("Could not save profile: %s") % (e,))
+
+	def _save_in_place(self):
 		if self.current_file.get_path().endswith(".mod"):
 			orig = self.current_file.get_path()[0:-4]
 			self.current_file = Gio.File.new_for_path(orig)
@@ -1014,7 +1077,7 @@ class App(Gtk.Application, UserDataManager, BindingEditor):
 			# so this block is executed only when number of connected
 			# controllers changes from 0 to 1
 			if len(self.dm.get_controllers()) > 0:
-				c = self.dm.get_controllers()[0]
+				c = self.preferred_controllers()[0]
 				self.load_gui_config_for_controller(c, first=True)
 		if count > self.controller_count:
 			# Controller added
@@ -1028,9 +1091,18 @@ class App(Gtk.Application, UserDataManager, BindingEditor):
 				self.remove_switcher(s)
 
 		# Assign controllers to widgets
+		ordered = self.preferred_controllers()
+		old0 = self.profile_switchers[0].get_controller()
+		old0_id = old0.get_id() if old0 else None
 		for i in range(count):
-			c = self.dm.get_controllers()[i]
-			self.profile_switchers[i].set_controller(c)
+			self.profile_switchers[i].set_controller(ordered[i])
+		if count > 0 and self.controller_count > 0 and ordered[0].get_id() != old0_id:
+			# fork: the controller being edited was unplugged; show the remaining one (its profile and diagram)
+			ps0 = self.profile_switchers[0]
+			name = ps0.get_controller().get_profile()
+			if name:
+				ps0.set_profile(name, create=True)
+			self.load_gui_config_for_controller(ordered[0], False)
 
 		if count == 0:
 			# Special case, no controllers are connected, but one widget has to stay on screen
@@ -1042,6 +1114,94 @@ class App(Gtk.Application, UserDataManager, BindingEditor):
 			self.enable_test_mode(self.profile_switchers[0].get_controller())
 
 		self.controller_count = count
+		self.refresh_controller_picker()
+
+	def preferred_controllers(self) -> list:
+		"""fork: connected controllers, the one to show first at the front (remembered choice, else an external one
+		over the Deck's built-in). Used so the window starts out on the right controller and does not resize/switch."""
+		cs = list(self.dm.get_controllers())
+		want = self.config["gui"].get("last_controller", "")
+		if want not in [c.get_id() for c in cs]:
+			want = next((c.get_id() for c in cs if not c.get_id().startswith("deck")), "")
+		return sorted(cs, key=lambda c: c.get_id() != want)
+
+	@staticmethod
+	def controller_label(cid: str, fallback: str) -> str:
+		"""Friendly name for a controller id like 'deck3:3' or 'sc1:3'."""
+		if cid.startswith("deck"):
+			return _("Steam Deck")
+		if cid.startswith("sc"):
+			return _("Steam Controller")
+		return fallback or cid
+
+	def refresh_controller_picker(self) -> None:
+		"""fork: one "Controller" dropdown on top, always shown; only changeable with 2+ controllers."""
+		controllers = self.dm.get_controllers()
+		vb = self.builder.get_object("vbSwitchers")
+		if not hasattr(self, "_picker"):
+			self._picker = Gtk.DropDown.new_from_strings([])
+			self._picker.set_hexpand(True)
+			self._picker_ids: list[str] = []
+			self._picker_busy = False
+			self._picker.connect("notify::selected", self.on_picker_selected)
+			# Row: Controller: [dropdown]; the label shares its width with "Profile:" below
+			self._picker_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+			ref = self.profile_switchers[0]
+			self._picker_row.set_margin_start(ref.get_margin_start())
+			self._picker_row.set_margin_end(ref.get_margin_end())
+			self._picker_row.set_visible(False)
+			lbl = Gtk.Label(label=_("Controller:"))
+			lbl.set_xalign(0)
+			self._picker_row.append(lbl)
+			self._picker_row.append(self._picker)
+			self._sg_label = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.HORIZONTAL)
+			self._sg_label.add_widget(lbl)
+			vb.append(self._picker_row)
+			vb.reorder_child_after(self._picker_row, None)
+			for ps in self.profile_switchers:
+				self.align_switcher(ps)
+		self._picker_busy = True
+		ids = [c.get_id() for c in controllers]
+		labels = [self.controller_label(i, self.config.get_controller_config(i)["name"]) for i in ids]
+		self._picker_ids = ids
+		self._picker.set_model(Gtk.StringList.new(labels or [_("No controller connected")]))
+		self._picker_row.set_visible(not self.osd_mode)  # always shown, so the layout never jumps
+		self._picker.set_sensitive(len(ids) > 1)  # nothing to choose with 0 or 1 controllers
+		if len(ids) > 1:
+			# Prefer the remembered controller, otherwise an external one over the Deck's built-in
+			want = self.config["gui"].get("last_controller", "")
+			if want not in ids:
+				want = next((i for i in ids if not i.startswith("deck")), ids[0])
+			cur = self.profile_switchers[0].get_controller()
+			if cur is None or cur.get_id() != want:
+				for ps in self.profile_switchers:
+					c = ps.get_controller()
+					if c is not None and c.get_id() == want:
+						self.on_switch_to_clicked(ps)
+						break
+			cur = self.profile_switchers[0].get_controller()
+			if cur is not None and cur.get_id() in ids:
+				self._picker.set_selected(ids.index(cur.get_id()))
+		self._picker_busy = False
+
+	def align_switcher(self, ps) -> None:
+		ps._icon.set_visible(False)  # the Controller dropdown already says which controller this is
+		self._sg_label.add_widget(ps._label)
+
+	def on_picker_selected(self, dropdown, *a) -> None:
+		if self._picker_busy:
+			return
+		i = dropdown.get_selected()
+		if i < 0 or i >= len(self._picker_ids):
+			return
+		cid = self._picker_ids[i]
+		for ps in self.profile_switchers:
+			c = ps.get_controller()
+			if c is not None and c.get_id() == cid:
+				self.on_switch_to_clicked(ps)
+				break
+		self.config["gui"]["last_controller"] = cid
+		self.config.save()
 
 	def new_profile(self, profile: Profile, name: str) -> None:
 		filename = os.path.join(get_profiles_path(), name + ".sccprofile")
@@ -1075,17 +1235,19 @@ class App(Gtk.Application, UserDataManager, BindingEditor):
 			# That means separator should be moved and shown when 2nd
 			# switcher is created.
 			vbSwitchers.reorder_child_after(sepSwitchers, None)
-			sepSwitchers.set_visible(True)
-		vbSwitchers.set_visible(True)
+		vbSwitchers.set_visible(getattr(self, "_ui_ready", True))
 
 		if self.osd_mode:
 			ps.set_allow_switch(False)
 
 		if len(self.profile_switchers) > 0:
 			ps.set_profile_list(self.profile_switchers[0].get_profile_list())
-			ps.set_switch_to_enabled(True)
+			# fork: only one profile row is shown; the controller dropdown picks which controller it belongs to
+			ps.set_visible(False)
 
 		self.profile_switchers.append(ps)
+		if hasattr(self, "_sg_label"):
+			self.align_switcher(ps)
 		ps.connect("changed", self.on_profile_selected)
 		ps.connect("unknown-profile", self.on_unknown_profile)
 		return ps

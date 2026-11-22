@@ -19,6 +19,11 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 import os
 import subprocess
 
+# fork: set before GTK is ever loaded. Software rendering avoids the "Failed to realize renderer ... EGL / Vulkan"
+# messages inside the AppImage (no GPU driver is reachable there, GTK fell back to this anyway). Dark theme is permanent.
+os.environ.setdefault("GSK_RENDERER", "cairo")
+os.environ.setdefault("GTK_THEME", "Adwaita:dark")
+
 # AppImageBuilder relies on its exec hooks to resolve relative shebang and ELF
 # interpreter paths. Python 3.13+ uses posix_spawn() in more situations, which
 # bypasses that compatibility path.
