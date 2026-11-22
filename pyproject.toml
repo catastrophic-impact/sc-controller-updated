@@ -1,12 +1,12 @@
 # TODO(Martin): Migrate files from setup.py - https://setuptools.pypa.io/en/latest/userguide/miscellaneous.html
 
 [build-system]
-requires = ["setuptools>=60", "setuptools-scm>=8.0", "wheel"]
+requires = ["setuptools>=60", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "sccontroller"
-dynamic = ["version"]
+version = "1.0.0"
 description = "User-mode driver, mapper and GTK4 based GUI for Steam Controller, DS4 and similar controllers."
 authors = [{name = "C0rn3j", email = "martin@rys.rs"}]
 license = "GPL-2.0-only"
@@ -70,8 +70,6 @@ packages = [
 	"scc.gui.importexport",
 	"scc.gui.creg"
 ]
-
-[tool.setuptools_scm]
 
 [tool.ruff]
 # Project uses 80 sporadically, so just do soft 80 and hard break at 120
